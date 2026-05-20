@@ -12,4 +12,12 @@ Make sure you have [Node.js](https://nodejs.org/) (v18 or higher recommended) in
 ### 3. Install Dependencies
 Open standard terminal window in VS Code (`Ctrl + ~` / `Cmd + ~`) and run:
 ```bash
-npm install
+npm install.
+
+### 4. Run Development Server
+Boot up Vite's lightning-fast development server:
+code
+Bash
+npm run dev
+### 5. Open in Browser
+Once active, hold Ctrl and select the local address outputting in your terminal (usually http://localhost:3000) to access the fully functional, real-time sync study portal!
