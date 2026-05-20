@@ -1,0 +1,196 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Helpers ---
+    function isSignedIn() { return request.auth != null; }
+    function isAdmin() {
+      return isSignedIn() && 
+             (request.auth.token.email == 'kyleespin4@gmail.com' ||
+              (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
+    }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isValidId(id) { return id is string && id.size() <= 128; }
+
+    // --- User Validation ---
+    function isValidUser(data) {
+      let required = ['uid', 'createdAt'];
+      return data.keys().hasAll(required) &&
+             data.uid == request.auth.uid &&
+             (data.email == null || (data.email is string && data.email.size() <= 100)) &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100)) &&
+             (!('university' in data) || (data.university is string && data.university.size() <= 100)) &&
+             (!('major' in data) || (data.major is string && data.major.size() <= 100)) &&
+             (!('avatar' in data) || (data.avatar is string && data.avatar.size() <= 1000)) &&
+             (!('aiUsageCount' in data) || (data.aiUsageCount is number)) &&
+             (!('points' in data) || (data.points is number)) &&
+             (!('rank' in data) || (data.rank is string)) &&
+             (!('badges' in data) || (data.badges is list)) &&
+             (!('isAnonymous' in data) || (data.isAnonymous is bool)) &&
+             (!('role' in data) || (data.role in ['user', 'admin'])) &&
+             (!('isPremium' in data) || (data.isPremium is bool));
+    }
+
+    match /users/{userId} {
+      allow list: if isSignedIn();
+      allow get: if isSignedIn();
+      allow create: if isOwner(userId) && isValidUser(incoming()) && incoming().createdAt == request.time;
+      allow update: if (isOwner(userId) || isAdmin()) && 
+                      (isOwner(userId) ? (isValidUser(incoming()) && 
+                      incoming().uid == existing().uid &&
+                      incoming().createdAt == existing().createdAt &&
+                      incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'university', 'major', 'avatar', 'isPremium', 'aiUsageCount', 'points', 'rank', 'badges', 'role'])) : true);
+      allow delete: if isAdmin();
+
+      match /invites/{inviteId} {
+        allow read, delete: if isOwner(userId);
+        // PRO members can create invites for other users to groups they are members of
+        allow create: if isSignedIn() && 
+                        isValidId(inviteId) &&
+                        incoming().targetUserId == userId &&
+                        incoming().senderId == request.auth.uid &&
+                        incoming().createdAt == request.time &&
+                        'groupId' in incoming();
+      }
+    }
+
+    // --- Material Validation ---
+    function isValidMaterial(data) {
+      let required = ['title', 'uploadedBy', 'createdAt'];
+      return data.keys().hasAll(required) &&
+             data.title is string && data.title.size() <= 200 &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 2000)) &&
+             (!('type' in data) || (data.type in ['notes', 'reviewer', 'summary', 'exam', 'practice'])) &&
+             (!('subject' in data) || (data.subject is string && data.subject.size() <= 200)) &&
+             (!('university' in data) || (data.university is string && data.university.size() <= 200)) &&
+             (!('rating' in data) || (data.rating is number)) &&
+             (!('downloadCount' in data) || (data.downloadCount is number)) &&
+             (!('content' in data) || (data.content is string && data.content.size() <= 1048576)); // 1MB limit for Firestore docs
+    }
+
+    match /materials/{materialId} {
+      allow list: if true;
+      allow get: if true;
+      allow create: if isSignedIn() && 
+                      isValidMaterial(incoming()) && 
+                      incoming().uploadedBy == request.auth.uid &&
+                      incoming().createdAt == request.time;
+      allow update: if isSignedIn() && (
+        isOwner(existing().uploadedBy) || 
+        isAdmin() ||
+        (incoming().diff(existing()).affectedKeys().hasOnly(['downloadCount', 'rating']))
+      );
+      allow delete: if isSignedIn() && (isOwner(existing().uploadedBy) || isAdmin());
+    }
+
+    // --- Group Validation ---
+    function isValidGroup(data) {
+      return data.name is string && 
+             (!('memberCount' in data) || data.memberCount is number) &&
+             (!('lastActive' in data) || data.lastActive is timestamp) &&
+             (!('recentAvatars' in data) || data.recentAvatars is list);
+    }
+
+    match /groups/{groupId} {
+      allow list: if true;
+      allow get: if true;
+      allow create: if isSignedIn() && isValidGroup(incoming()) && incoming().createdBy == request.auth.uid;
+      allow update: if isSignedIn() && (
+                      existing().createdBy == request.auth.uid || 
+                      isAdmin() ||
+                      incoming().diff(existing()).affectedKeys().hasOnly(['memberCount', 'lastActive', 'recentAvatars', 'awardPoints'])
+                    );
+      allow delete: if isSignedIn() && (existing().createdBy == request.auth.uid || isAdmin());
+
+      match /members/{userId} {
+        allow read: if isSignedIn();
+        allow create, update: if isSignedIn() && (request.auth.uid == userId || get(/databases/$(database)/documents/groups/$(groupId)).data.createdBy == request.auth.uid || isAdmin());
+        allow delete: if isSignedIn() && (
+                        request.auth.uid == userId || 
+                        get(/databases/$(database)/documents/groups/$(groupId)).data.createdBy == request.auth.uid ||
+                        isAdmin()
+                      );
+      }
+
+      match /chats/{messageId} {
+        allow list, get: if isSignedIn() && exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid));
+        allow create: if isSignedIn() && 
+                        exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)) &&
+                        incoming().senderId == request.auth.uid &&
+                        incoming().createdAt == request.time;
+        allow delete: if isSignedIn() && (
+                        isOwner(existing().senderId) || 
+                        get(/databases/$(database)/documents/groups/$(groupId)).data.createdBy == request.auth.uid ||
+                        isAdmin()
+                      );
+      }
+
+      match /resources/{resourceId} {
+        allow read: if isSignedIn() && exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid));
+        allow create: if isSignedIn() && 
+                        exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)) &&
+                        incoming().addedBy == request.auth.uid &&
+                        incoming().createdAt == request.time;
+        allow delete: if isSignedIn() && (
+                        isOwner(existing().addedBy) || 
+                        get(/databases/$(database)/documents/groups/$(groupId)).data.createdBy == request.auth.uid ||
+                        isAdmin()
+                      );
+      }
+
+      match /tasks/{taskId} {
+        allow read: if isSignedIn() && exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid));
+        allow create: if isSignedIn() && 
+                        exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)) &&
+                        incoming().createdBy == request.auth.uid &&
+                        incoming().createdAt == request.time;
+        allow update: if isSignedIn() && 
+                        exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid));
+        allow delete: if isSignedIn() && (
+                        isOwner(existing().createdBy) || 
+                        get(/databases/$(database)/documents/groups/$(groupId)).data.createdBy == request.auth.uid ||
+                        isAdmin()
+                      );
+      }
+    }
+
+    match /dm_conversations/{conversationId} {
+      function isValidConversation(data) {
+        return data.participants is list && 
+               data.participants.size() == 2 &&
+               (request.auth.uid in data.participants);
+      }
+
+      allow read: if isSignedIn() && (request.auth.uid in resource.data.participants);
+      allow create: if isSignedIn() && 
+                      isValidConversation(incoming());
+      allow update: if isSignedIn() && 
+                      (request.auth.uid in resource.data.participants) &&
+                      incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'lastMessageAt', 'unreadCount', 'participantDetails', 'participants']);
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn() && 
+                       (request.auth.uid in get(/databases/$(database)/documents/dm_conversations/$(conversationId)).data.participants);
+        
+        allow create: if isSignedIn() && 
+                        (request.auth.uid in get(/databases/$(database)/documents/dm_conversations/$(conversationId)).data.participants) &&
+                        incoming().senderId == request.auth.uid &&
+                        incoming().createdAt == request.time &&
+                        (!('text' in incoming()) || (incoming().text is string && incoming().text.size() <= 5000)) &&
+                        (!('attachment' in incoming()) || (
+                          incoming().attachment.type in ['image', 'file'] &&
+                          incoming().attachment.name is string && incoming().attachment.name.size() <= 200 &&
+                          (!('content' in incoming().attachment) || (incoming().attachment.content is string && incoming().attachment.content.size() <= 1048576))
+                        ));
+        allow delete: if isSignedIn() && isOwner(existing().senderId);
+      }
+    }
+  }
+}

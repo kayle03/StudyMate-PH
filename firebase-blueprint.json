@@ -1,0 +1,91 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "university": { "type": "string" },
+        "major": { "type": "string" },
+        "avatar": { "type": "string" },
+        "points": { "type": "number", "description": "Gamification points" },
+        "rank": { "type": "string", "description": "Title based on points" },
+        "badges": { "type": "array", "description": "Earned badges" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "GroupTask": {
+      "title": "Group Task",
+      "description": "Task in a Kanban board for a study group",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["todo", "in-progress", "done"] },
+        "priority": { "type": "string", "enum": ["low", "medium", "high"] },
+        "assignedTo": { "type": "string" },
+        "assignedToName": { "type": "string" },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "status", "createdBy", "createdAt"]
+    },
+    "StudyMaterial": {
+      "title": "Study Material",
+      "description": "Academic resources uploaded by users",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "type": { "type": "string", "enum": ["notes", "reviewer", "summary", "exam", "practice"] },
+        "subject": { "type": "string" },
+        "university": { "type": "string" },
+        "uploadedBy": { "type": "string" },
+        "uploadedByName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "rating": { "type": "number" },
+        "downloadCount": { "type": "number" },
+        "content": { "type": "string" }
+      },
+      "required": ["title", "uploadedBy", "createdAt"]
+    },
+    "StudyGroup": {
+      "title": "Study Group",
+      "description": "Collaborative study groups",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "subject": { "type": "string" },
+        "university": { "type": "string" },
+        "memberCount": { "type": "number" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "createdBy", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "Private user profiles"
+    },
+    "materials/{materialId}": {
+      "schema": "StudyMaterial",
+      "description": "Public study resource repository"
+    },
+    "groups/{groupId}": {
+      "schema": "StudyGroup",
+      "description": "Community study groups"
+    },
+    "groups/{groupId}/tasks/{taskId}": {
+      "schema": "GroupTask",
+      "description": "Task management within a group"
+    }
+  }
+}
